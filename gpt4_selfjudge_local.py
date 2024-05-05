@@ -42,11 +42,13 @@ def process_prompts():
             result = cursor.fetchone()
             content = f"請您實際的使用\n1.修補方法: {result['trained_result']} 來修補\n2.漏洞: {result['description']} 確認實作修補策略是否可修補這個漏洞\n3.只需要回答是或否即可。"
             response = requests.get(f"http://127.0.0.1:5500?text={content}")
-            if check_for_error(response.text):
-                continue
-            decision = clean_text(response.text)
-            print(decision)
-            update_field(connection, prompt_id, field_name, decision)
+            if "500 Internal Server Error" not in response.text:
+                decision = clean_text(response.text)
+                print(decision)
+                update_field(connection, prompt_id, field_name, decision)
+            else:
+                print("收到伺服器錯誤，不進行寫入。")
+            reset_is_taken_if_needed(connection)
     except Exception as e:
         print(f"發生錯誤：{str(e)}")
     finally:
