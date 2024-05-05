@@ -4,6 +4,7 @@ from g4f.client import Client
 import base64
 import requests
 
+# 初始化 Groq 客戶端
 def connect_to_database():
     pwString = "QVZOU18zQ0ZFcG9lRnlFRU4zX2VvUThL"
     pwBytes = base64.b64decode(pwString)
@@ -19,12 +20,45 @@ def clean_text(input_text):
     print(f"清理後的文字: {cleaned_text}")
     return cleaned_text
 
-def check_for_error(response_text):
-    error_message = "<!doctype html>\n<html lang=en>\n<title>500 Internal Server Error</title>\n<h1>Internal Server Error</h1>\n<p>The server encountered an internal error and was unable to complete your request. Either the server is overloaded or there is an error in the application.</p>"
-    if error_message in response_text:
-        print("偵測到內部伺服器錯誤訊息，不進行資料庫更新。")
-        return True
-    return False
+def reset_is_taken_if_needed(connection):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) AS count FROM prompts WHERE is_taken = 1")
+        count_result = cursor.fetchone()
+        if count_result['count'] > 20:
+            print("is_taken = 1的數量超過20，正在重設...")
+            cursor.execute("UPDATE prompts SET is_taken = 0")
+            connection.commit()
+            print("所有is_taken已重設為0。")
+
+def get_next_prompt(connection):
+    with connection.cursor() as cursor:
+        for i in range(1, 21):
+            field_name = f"result{i}"
+            cursor.execute(f"""
+                SELECT prompts.id FROM prompts
+                INNER JOIN gpt4_judged_final ON prompts.id = gpt4_judged_final.prompts_id
+                WHERE prompts.is_taken = 0 AND gpt4_judged_final.{field_name} IS NULL
+                ORDER BY prompts.id ASC
+                LIMIT 1
+            """)
+            result = cursor.fetchone()
+            if result:
+                prompt_id = result['id']
+                cursor.execute("UPDATE prompts SET is_taken = 1 WHERE id = %s", (prompt_id,))
+                connection.commit()
+                print(f"獲得並設置提示ID {prompt_id} 的 is_taken 為1，欄位：{field_name}")
+                return {'id': prompt_id, 'field_name': field_name}
+        print("沒有可用的提示ID或空缺欄位")
+        reset_is_taken_if_needed(connection)
+        return None
+
+
+def update_field(connection, prompt_id, field_name, decision):
+    with connection.cursor() as cursor:
+        cursor.execute(f"UPDATE gpt4_judged_final SET {field_name} = %s WHERE prompts_id = %s AND {field_name} IS NULL", (decision, prompt_id))
+        connection.commit()
+        print(f"gpt4_judged_final表更新成功，ID {prompt_id}，欄位：{field_name}")
+
 
 def process_prompts():
     client = Client()
