@@ -1,4 +1,2 @@
 pymysql
-re
-base64
 requests
